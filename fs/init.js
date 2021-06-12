@@ -1,12 +1,14 @@
 load('api_config.js');
 load('api_i2c.js');
 load('api_mqtt.js');
+load('api_sensor_utils.js');
 load('api_timer.js');
 
 let deviceId = Cfg.get('device.id');
 print('deviceId:', deviceId)
 let deviceType = 'esp32';
 let pollInterval = Cfg.get('interval') * 1000;
+let sampleSize = Cfg.get('stats.sample_size');
 // i2c settings
 let i2cAddr = 0x36;
 let tempOffset = "\x00\x04";
@@ -53,16 +55,26 @@ let moistureRead = function(bus) {
 let i2c = I2C.get();
 MQTT.pub('esp32/' + deviceId + '/status', 'online');
 Timer.set(pollInterval, true, function() {
-  let now = Timer.now();
-  let tempC = getTemp(i2c);
-  if (tempC) {
-    let tempF = (tempC * (9/5)) + 32;
-    MQTT.pub(tempTopic, JSON.stringify(tempF));
-    print("tempF:", JSON.stringify(tempF));
-  }
-  let moisture = moistureRead(i2c);
-  if (moisture) {
-    MQTT.pub(moistureTopic, JSON.stringify(moisture));
-    print("moisture:", JSON.stringify(moisture))
+  let temperatureStatsObj = SensorUtils.initStatistics(sampleSize);
+  let moistureStatsObj = SensorUtils.initStatistics(sampleSize);
+  for (let i = 0; i < sampleSize; i++) {
+    let now = Timer.now();
+    let tempC = getTemp(i2c);
+    if (tempC) {
+      let tempF = (tempC * (9/5)) + 32;
+      MQTT.pub(tempTopic, JSON.stringify(tempF));
+      print("tempF:", JSON.stringify(tempF));
+      SensorUtils.addData(temperatureStatsObj, tempF);
+    }
+    let moisture = moistureRead(i2c);
+    if (moisture) {
+      MQTT.pub(moistureTopic, JSON.stringify(moisture));
+      print("moisture:", JSON.stringify(moisture))
+      SensorUtils.addData(moistureStatsObj, tempF);
+    }
+    let temperatureStats = SensorUtils.calculateStatistics(temperatureStatsObj);
+    let moistureStats = SensorUtils.calculateStatistics(moistureStatsObj);
+    print('normalized (mean) temperature: ', JSON.stringify(temperatureStats.mean));
+    print('normalized (mean) moisture: ', JSON.stringify(moistureStats.mean));
   }
 }, null);
